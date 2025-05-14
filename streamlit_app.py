@@ -3,8 +3,9 @@ from openai import OpenAI
 import PyPDF2
 import requests
 from bs4 import BeautifulSoup
+from openai import RateLimitError, AuthenticationError
 
-# קריאת מפתח ה-API מסודות
+# התחברות עם מפתח API מתוך Streamlit secrets
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # חילוץ טקסט מקובץ PDF
@@ -25,7 +26,7 @@ def extract_text_from_url(url):
     except Exception as e:
         return f"Error extracting text: {e}"
 
-# קביעת מספר tokens לפי סגנון הסיכום
+# הגבלת כמות מילים לפי סגנון
 def get_token_limit(style):
     return {
         "short": 400,
@@ -33,35 +34,41 @@ def get_token_limit(style):
         "bullet points": 1000
     }.get(style, 600)
 
-# סיכום טקסט בעזרת GPT
+# סיכום טקסט
 def summarize_text(text, style="short"):
     prompt = f"Summarize the following text in a {style} style:\n\n{text}"
     max_tokens = get_token_limit(style)
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.5,
-        max_tokens=max_tokens
-    )
-    return response.choices[0].message.content
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.5,
+            max_tokens=max_tokens
+        )
+        return response.choices[0].message.content
+    except RateLimitError:
+        return "❌ בקשתך נחסמה זמנית עקב עומס. נסי שוב בעוד דקה."
+    except AuthenticationError:
+        return "🔐 בעיה באימות המפתח. ודאי שה־API Key נכון ונמצא ב־secrets."
 
-# מענה לשאלות על הטקסט
+# מענה על שאלה
 def answer_question(text, question):
-    prompt = f"""Answer the following question based on the text below:\n
-Text: {text}\n\n
-Question: {question}\n
-Answer:"""
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=300
-    )
-    return response.choices[0].message.content
+    prompt = f"""Answer the following question based on the text below:\n\nText: {text}\n\nQuestion: {question}\nAnswer:"""
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=300
+        )
+        return response.choices[0].message.content
+    except RateLimitError:
+        return "❌ כרגע יש עומס. אנא נסי שוב בעוד רגע."
+    except AuthenticationError:
+        return "🔐 בעיה בזיהוי המפתח. בדקי את OPENAI_API_KEY."
 
 # ממשק המשתמש
 st.title("📄 AI Document Analyzer")
-
 source = st.radio("Choose document source:", ["Upload PDF/TXT", "Enter URL"])
 text = ""
 
